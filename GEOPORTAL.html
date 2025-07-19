@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Geoportal de agendamiento de citas</title>
+<link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet"/>
+<style>
+    /* (Mismo CSS que antes, sin cambios) */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+    .container { display: flex; height: 100vh; gap: 10px; padding: 10px; }
+    .sidebar { width: 380px; background: rgba(255,255,255,0.95); backdrop-filter: blur(10px); border-radius: 15px; padding: 20px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); overflow-y: auto; }
+    .map-container { flex: 1; position: relative; background: white; border-radius: 15px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.1); }
+    #map { width:100%; height:100%; }
+    .header { text-align: center; margin-bottom:20px; }
+    .header h1 { font-size:24px; color:#333; margin-bottom:5px; }
+    .header p { font-size:14px; color:#666; }
+    .table-selector, .stats, .filters, .table-info { margin-bottom:20px; }
+    .table-selector, .info-panel { background:#f8f9fa; padding:15px; border-radius:10px; }
+    .table-selector label, .filter-group label { display:block; margin-bottom:8px; font-weight:600; color:#333; }
+    .table-selector select, .filter-group input, .filter-group select { width:100%; padding:10px; border:2px solid #e1e5e9; border-radius:8px; font-size:14px; transition:border-color .3s; }
+    .filter-group input:focus, .filter-group select:focus { outline:none; border-color:#3867d6; }
+    .stats { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .stat-card {
+      background: linear-gradient(45deg, #1e3c72, #2a5298);
+      color: white;
+      padding: 15px;
+      border-radius: 10px;
+      text-align: center;
+      font-weight: 700;
+    }
+    .stat-card h3 { font-size: 18px; margin-bottom: 5px; }
+    .stat-card p { font-size: 11px; opacity: 0.9; }
+    .filters .filter-group { margin-bottom:15px; }
+    .btn {
+      width: 100%;
+      margin-bottom: 10px;
+      background: linear-gradient(45deg, #1e3c72, #2a5298);
+      color: white;
+      border: none;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform .2s;
+    }
+    .btn:hover { transform: translateY(-2px); }
+    .btn:active { transform: translateY(0); }
+    .btn:disabled { opacity: .6; cursor: not-allowed; transform:none; }
+    .btn.secondary {
+      background: linear-gradient(45deg, #4a90e2, #357abd);
+    }
+    .btn.danger {
+      background: linear-gradient(45deg, #c0392b, #e74c3c);
+    }
+    .loading, .map-loading {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(255, 255, 255, 0.95);
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      z-index: 1000;
+      display: none;
+    }
+    .spinner {
+      width: 20px;
+      height: 20px;
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #3867d6;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 10px auto;
+    }
+    @keyframes spin { 0% { transform: rotate(0); } 100% { transform: rotate(360deg); } }
+    .info-panel { background:#f8f9fa; padding:15px; border-radius:10px; max-height:300px; overflow-y:auto; }
+    .info-panel h3 { margin-bottom:10px; color:#333; }
+    .info-panel .field { margin-bottom:8px; font-size:13px; }
+    .info-panel .field strong { color:#3867d6; }
+    .leaflet-popup-content-wrapper { border-radius: 10px; }
+    .leaflet-popup-content { margin: 10px 15px; line-height: 1.4; }
+    .popup-title { font-weight: bold; color: #333; margin-bottom: 8px; font-size: 16px; }
+    .popup-field { margin-bottom: 4px; font-size: 13px; }
+    .popup-field strong { color: #3867d6; }
+    .zoom-info {
+      position: absolute; top: 10px; right: 10px;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 8px 12px;
+      border-radius: 5px;
+      font-size: 12px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      z-index: 1000;
+      color: #333;
+      font-weight: 600;
+    }
+    .status {
+      padding: 10px;
+      border-radius: 8px;
+      font-size: 14px;
+      margin-bottom: 15px;
+    }
+    .status.loading { background: #f8f9fa; color: #3867d6; }
+    .status.success { background: #f8f9fa; color: #28a745; }
+    .status.error { background: #f8f9fa; color: #c0392b; }
+    .table-info {
+      background: #e3f2fd;
+      padding: 12px;
+      border-radius: 8px;
+      border-left: 4px solid #2196f3;
+    }
+    .table-info h4 {
+      color: #1976d2;
+      margin-bottom: 5px;
+      font-size: 14px;
+    }
+    .table-info p {
+      color: #424242;
+      font-size: 12px;
+      margin: 2px 0;
+    }
+    .columns-preview {
+      background: #f5f5f5;
+      padding: 10px;
+      border-radius: 6px;
+      font-size: 11px;
+    }
+    .columns-preview strong { color: #333; }
+    .sample-data {
+      background: #fff3cd;
+      padding: 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+
+    /* Formulario */
+    .formulario-container {
+      background: #fdfdfd;
+      padding: 15px;
+      border-radius: 10px;
+      font-size: 14px;
+      margin-top: 15px;
+      box-shadow: 0 0 8px rgba(56,103,214,0.4);
+    }
+    .formulario-container label {
+      font-weight: 700;
+      margin-top: 10px;
+      display: block;
+      color: #333;
+    }
+    .formulario-container input {
+      width: 100%;
+      padding: 6px;
+      margin-top: 5px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
+    .formulario-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .formulario-grid div {
+      display: flex;
+      flex-direction: column;
+    }
+    .formulario-container button {
+      width: 100%;
+      padding: 10px;
+      margin-top: 15px;
+      background: linear-gradient(45deg, #1e3c72, #2a5298);
+      color: white;
+      border: none;
+      border-radius: 5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+    .formulario-container button:hover {
+      background: linear-gradient(45deg, #274690, #182c61);
+    }
+    #status, #resultadoBusqueda {
+      margin-top: 10px;
+      font-weight: 700;
+      text-align: center;
+      color: #333;
+    }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="sidebar">
+    <div class="header"><h1>Geoportal de agendamiento de citas</h1><p>Visualización de datos geoespaciales</p></div>
+    <div class="status loading" id="connectionStatus">📡 Conectando con la base de datos...</div>
+    <div class="table-selector">
+      <label for="tableSelect">Seleccionar Tabla:</label>
+      <select id="tableSelect" onchange="onTableChange()"><option value="">Seleccionar tabla...</option></select>
+    </div>
+    <div class="table-info" id="tableInfo" style="display:none;">
+      <h4 id="tableTitle">Información de la tabla</h4>
+      <p id="tableDescription">Cargando información...</p>
+      <div class="columns-preview" id="columnsPreview"></div>
+      <div class="sample-data" id="sampleData"></div>
+    </div>
+    <div class="stats">
+      <div class="stat-card"><h3 id="totalRecords">0</h3><p>Total Registros</p></div>
+      <div class="stat-card"><h3 id="visibleRecords">0</h3><p>Visibles</p></div>
+    </div>
+    <div class="filters">
+      <div class="filter-group"><label for="searchField">Buscar en:</label><select id="searchField"><option value="">Seleccionar campo...</option></select></div>
+      <div class="filter-group"><label for="searchValue">Valor de búsqueda:</label><input id="searchValue" placeholder="Ingrese valor a buscar..." type="text"/></div>
+      <div class="filter-group"><label for="limitRecords">Límite de registros:</label><select id="limitRecords"><option value="100">100 registros</option><option value="500">500 registros</option><option selected value="1000">1000 registros</option><option value="2000">2000 registros</option><option value="5000">5000 registros</option><option value="10000">10000 registros</option></select></div>
+      <button class="btn" id="loadBtn" onclick="loadTableData()">🔍 Cargar Datos</button>
+      <button class="btn" onclick="clearFilters()">🗑️ Limpiar</button>
+      <!-- Botón Ajustar Vista eliminado -->
+      <button class="btn danger" onclick="exportData()">📊 Exportar CSV</button>
+    </div>
+    <div class="info-panel" id="recordInfo" style="display:none;"></div>
+    <hr style="margin: 20px 0;"/>
+    <h3 style="text-align:center;">📋 Reportar cita</h3>
+    <body class="formulario-container">
+      <h2>Formulario de citas</h2>
+      <form id="formulario">
+        <label for="clave_catastral">Clave Catastral:</label>
+        <input id="clave_catastral" required type="text"/>
+        <p id="resultadoBusqueda"></p>
+        <label for="nombre_propietario">Nombre del propietario:</label>
+        <input id="nombre_propietario" required type="text"/>
+        <div class="formulario-grid">
+          <div>
+            <label for="numero_tramite">Número de trámite:</label>
+            <input id="numero_tramite" required type="text"/>
+          </div>
+          <div>
+            <label for="tipo_problema">Tipo de problema:</label>
+            <input id="tipo_problema" required type="text"/>
+          </div>
+        </div>
+        <button id="getLocationBtn" type="button">📍 Obtener ubicación actual</button>
+        <label for="latitud">Latitud:</label>
+        <input id="latitud" readonly required step="any" type="number"/>
+        <label for="longitud">Longitud:</label>
+        <input id="longitud" readonly required step="any" type="number"/>
+        <button type="submit">Enviar</button>
+      </form>
+      <p id="status"></p>
+    </body>
+  </div>
+  <div class="map-container">
+    <div class="map-loading" id="mapLoading">
+      <div class="spinner"></div>
+      <p id="loadingText">Cargando datos...</p>
+    </div>
+    <div class="zoom-info">
+      <div>Tabla: <span id="currentTable">-</span></div>
+      <div>Zoom: <span id="currentZoom">10</span></div>
+      <div>Registros: <span id="currentRecords">0</span></div>
+    </div>
+    <div id="map"></div>
+  </div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const SUPABASE_URL = 'https://nxootvmsolnafvccjlna.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im54b290dm1zb2xuYWZ2Y2NqbG5hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTEzMjg5NjgsImV4cCI6MjA2NjkwNDk2OH0.E3rVyzKVFo-1w450xf6qIKRbGRfcNqX-008IGuejnNw';
+    const AVAILABLE_TABLES = {
+      aivas: { name: 'AIVAS', description: 'Datos de sistema AIVAS', geoColumns: ['geom','geometry','the_geom','wkb_geometry'], idColumn: 'id', searchableColumns: ['nombre','descripcion','codigo'] },
+      problemas_predios: { name: 'Problemas Predios', description: 'Registro de problemas en predios', geoColumns: ['geom','geometry','the_geom'], idColumn: 'id', searchableColumns: ['descripcion','tipo_problema','estado'] },
+      predios2: { name: 'Predios 2', description: 'Base de datos de predios actualizada', geoColumns: ['geom','geometry','the_geom'], idColumn: 'gid', searchableColumns: ['id_pred','tipo_pred','uso_pred'] },
+      admin_chillos: { name: 'Admin Chillos', description: 'Datos administrativos de Chillos', geoColumns: ['geom','geometry','the_geom'], idColumn: 'id', searchableColumns: ['nombre','tipo','sector'] },
+      borde: { name: 'Borde', description: 'Datos de límites y bordes', geoColumns: ['geom','geometry','the_geom'], idColumn: 'id', searchableColumns: ['nombre','tipo'] }
+      // capas "clases_tierra" eliminada
+    };
+    let map, layerGroup, currentData = [], currentTable = '', loading = false;
+    let tableColumns = [];
+    function initMap() {
+      map = L.map('map').setView([-0.2295, -78.5249], 10);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap contributors' }).addTo(map);
+      layerGroup = L.layerGroup().addTo(map);
+      map.on('zoomend', () => document.getElementById('currentZoom').textContent = map.getZoom());
+    }
+    async function testConnection() {
+      try {
+        setStatus('📡 Probando conexión...', 'loading');
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/`, { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` } });
+        if (res.ok) { setStatus('✅ Conexión exitosa', 'success'); return true; }
+        throw new Error(res.status);
+      } catch (e) {
+        console.error(e);
+        setStatus('❌ Error de conexión', 'error');
+        return false;
+      }
+    }
+    function populateTableSelector() {
+      const sel = document.getElementById('tableSelect');
+      Object.keys(AVAILABLE_TABLES).forEach(t => {
+        const o = document.createElement('option'); o.value = t; o.textContent = AVAILABLE_TABLES[t].name; sel.appendChild(o);
+      });
+    }
+    async function onTableChange() {
+      const t = document.getElementById('tableSelect').value;
+      if (!t) { hideTableInfo(); return; }
+      currentTable = t;
+      document.getElementById('currentTable').textContent = AVAILABLE_TABLES[t].name;
+      await loadTableStructure(t);
+      showTableInfo(t);
+      clearMap();
+    }
+    async function loadTableStructure(table) {
+      try {
+        setStatus('📋 Cargando estructura...', 'loading');
+        const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?limit=3`, { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` } });
+        if (!r.ok) throw new Error(r.status);
+        const sd = await r.json();
+        if (sd.length) {
+          tableColumns = Object.keys(sd[0]);
+          populateSearchFields();
+          showSampleData(sd);
+          const cr = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=count`, { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, Prefer: 'count=exact' } });
+          if (cr.ok) {
+            const crh = cr.headers.get('Content-Range'), tot = crh ? parseInt(crh.split('/')[1]) : 0;
+            document.getElementById('totalRecords').textContent = tot.toLocaleString();
+          }
+        }
+        setStatus('✅ Estructura cargada', 'success');
+      } catch (e) {
+        console.error(e);
+        setStatus('❌ Error cargando estructura', 'error');
+      }
+    }
+    function showTableInfo(table) {
+      const i = AVAILABLE_TABLES[table];
+      document.getElementById('tableTitle').textContent = i.name;
+      document.getElementById('tableDescription').textContent = i.description;
+      document.getElementById('columnsPreview').innerHTML = `<strong>Columnas:</strong> ${tableColumns.join(', ')}`;
+      document.getElementById('tableInfo').style.display = 'block';
+    }
+    function hideTableInfo() {
+      document.getElementById('tableInfo').style.display = 'none';
+      document.getElementById('currentTable').textContent = '-';
+      currentTable = '';
+    }
+    function showSampleData(data) {
+      const sd = document.getElementById('sampleData');
+      sd.innerHTML = '<strong>Datos de muestra:</strong><br>' + data.map(r => Object.entries(r).slice(0, 3).map(([k, v]) => `${k}: ${v}`).join(', ')).join('<br>');
+    }
+    function populateSearchFields() {
+      const sf = document.getElementById('searchField');
+      sf.innerHTML = '<option value="">Seleccionar campo...</option>';
+      tableColumns.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; sf.appendChild(o); });
+    }
+    async function loadTableData() {
+      if (!currentTable) { alert('Seleccione una tabla'); return; }
+      if (loading) return;
+      loading = true; showLoader(true); setStatus('📊 Cargando datos...', 'loading');
+      try {
+        const lim = document.getElementById('limitRecords').value;
+        const sf = document.getElementById('searchField').value;
+        const sv = document.getElementById('searchValue').value.trim();
+        let url = `${SUPABASE_URL}/rest/v1/${currentTable}?limit=${lim}`;
+        if (sf && sv) url += `&${sf}=ilike.*${encodeURIComponent(sv)}*`;
+        const r = await fetch(url, { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` } });
+        if (!r.ok) throw new Error(r.status);
+        const d = await r.json(); currentData = d;
+        renderDataOnMap(d);
+        document.getElementById('visibleRecords').textContent = d.length.toLocaleString();
+        document.getElementById('currentRecords').textContent = d.length.toLocaleString();
+        setStatus(`✅ Cargados ${d.length} registros`, 'success');
+
+        // Zoom al conjunto de geometrías cargadas para cualquier búsqueda
+        if (d.length > 0) {
+          const cfg = AVAILABLE_TABLES[currentTable];
+          const geomCol = cfg.geoColumns.find(c => d.some(r => r[c]));
+          if (geomCol) {
+            try {
+              const geojsonFeatures = d
+                .map(r => {
+                  const g = r[geomCol];
+                  if (!g) return null;
+                  return typeof g === 'string' ? JSON.parse(g) : g;
+                })
+                .filter(g => g !== null);
+
+              if (geojsonFeatures.length === 1) {
+                const geom = geojsonFeatures[0];
+                if (geom.type === 'Point') {
+                  map.setView([geom.coordinates[1], geom.coordinates[0]], 18);
+                } else {
+                  const layer = L.geoJSON(geom);
+                  map.fitBounds(layer.getBounds(), { padding: [20, 20] });
+                }
+              } else if (geojsonFeatures.length > 1) {
+                const featureCollection = {
+                  type: "FeatureCollection",
+                  features: geojsonFeatures.map(geom => ({ type: "Feature", geometry: geom }))
+                };
+                const layer = L.geoJSON(featureCollection);
+                map.fitBounds(layer.getBounds(), { padding: [20, 20] });
+              }
+            } catch (error) {
+              console.warn('Error haciendo zoom a las geometrías:', error);
+            }
+          }
+        }
+
+      } catch (e) {
+        console.error(e);
+        setStatus('❌ Error cargando datos', 'error');
+      } finally { loading = false; showLoader(false); }
+    }
+    function renderDataOnMap(data) {
+      clearMap();
+      const cfg = AVAILABLE_TABLES[currentTable];
+      const geomCol = cfg.geoColumns.find(c => data.some(r => r[c]));
+      if (!geomCol) return;
+      let count = 0;
+      data.forEach((r, i) => {
+        try {
+          const g = r[geomCol];
+          const geom = typeof g === 'string' ? JSON.parse(g) : g;
+          let layer;
+          if (geom.type === 'Point') {
+            layer = L.circleMarker([geom.coordinates[1], geom.coordinates[0]], { radius: 6, color: getColorForTable(currentTable), fillColor: getColorForTable(currentTable), fillOpacity: .7, weight: 2 });
+          } else {
+            layer = L.geoJSON(geom, { style: { color: getColorForTable(currentTable), weight: 2, fillOpacity: .3 } });
+          }
+          if (layer) { layer.bindPopup(createPopupContent(r, i)); layer.on('click', () => showRecordInfo(r)); layerGroup.addLayer(layer); count++; }
+        } catch (e) { console.warn('Error renderizando geometría', e); }
+      });
+      if (count) setTimeout(() => { try { map.fitBounds(layerGroup.getBounds(), { padding: [20, 20] }); } catch {} }, 100);
+    }
+    function createPopupContent(r, i) {
+      const cfg = AVAILABLE_TABLES[currentTable];
+      const id = r[cfg.idColumn] || i;
+      let c = `<div class="popup-title">${cfg.name} #${id}</div>`;
+      Object.entries(r).slice(0, 6).forEach(([k, v]) => { if (k !== cfg.geoColumns.find(col => r[col]) && v != null) c += `<div class="popup-field"><strong>${k}:</strong> ${v}</div>`; });
+      return c;
+    }
+    function showRecordInfo(r) {
+      const div = document.getElementById('recordInfo');
+      let c = '<h3>Información del Registro</h3>';
+      Object.entries(r).forEach(([k, v]) => { if (v != null && typeof v !== 'object') c += `<div class="field"><strong>${k}:</strong> ${v}</div>`; });
+      div.innerHTML = c; div.style.display = 'block';
+    }
+    function getColorForTable(t) {
+      return {
+        aivas: '#1e3c72',
+        problemas_predios: '#357abd',
+        predios2: '#4a90e2',
+        admin_chillos: '#2a5298',
+        borde: '#74b9ff'
+        // clases_tierra eliminada
+      }[t] || '#1e3c72';
+    }
+    function clearMap() { layerGroup.clearLayers(); document.getElementById('visibleRecords').textContent = '0'; document.getElementById('currentRecords').textContent = '0'; }
+    function clearFilters() { document.getElementById('searchField').value = ''; document.getElementById('searchValue').value = ''; document.getElementById('limitRecords').value = '1000'; clearMap(); }
+    function exportData() {
+      if (!currentData.length) { alert('No hay datos para exportar'); return; }
+      const headers = Object.keys(currentData[0]);
+      const csv = [headers.join(',')];
+      currentData.forEach(r => {
+        csv.push(headers.map(h => {
+          const v = r[h];
+          if (v == null) return '';
+          return typeof v === 'object' ? JSON.stringify(v) : String(v).replace(/,/g, ';');
+        }).join(','));
+      });
+      const blob = new Blob([csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `${currentTable}_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    }
+    function setStatus(msg, cls) {
+      const s = document.getElementById('connectionStatus');
+      s.textContent = msg;
+      s.className = `status ${cls}`;
+    }
+    function showLoader(show) {
+      const l = document.getElementById('mapLoading');
+      const btn = document.getElementById('loadBtn');
+      l.style.display = show ? 'block' : 'none';
+      btn.disabled = show;
+      btn.textContent = show ? '⏳ Cargando...' : '🔍 Cargar Datos';
+    }
+    window.addEventListener('load', async () => { initMap(); if (await testConnection()) populateTableSelector(); });
+  </script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+<script>
+    const { createClient } = supabase;
+    const sb = createClient(
+      SUPABASE_URL,
+      SUPABASE_ANON_KEY
+    );
+
+    const status = document.getElementById('status');
+    const latInput = document.getElementById('latitud');
+    const lonInput = document.getElementById('longitud');
+    const getLocationBtn = document.getElementById('getLocationBtn');
+    const resultadoBusqueda = document.getElementById('resultadoBusqueda');
+    const claveInput = document.getElementById('clave_catastral');
+
+    const nombreInput = document.getElementById('nombre_propietario');
+    const tramiteInput = document.getElementById('numero_tramite');
+    const problemaInput = document.getElementById('tipo_problema');
+    const enviarBtn = document.querySelector('button[type="submit"]');
+
+    function setCamposHabilitados(habilitar) {
+      nombreInput.disabled = !habilitar;
+      tramiteInput.disabled = !habilitar;
+      problemaInput.disabled = !habilitar;
+      getLocationBtn.disabled = !habilitar;
+      enviarBtn.disabled = !habilitar;
+    }
+
+    setCamposHabilitados(false);
+
+    claveInput.addEventListener('blur', async () => {
+      const claveCata = claveInput.value.trim();
+      if (!claveCata) {
+        resultadoBusqueda.textContent = '⚠️ Ingresa una clave catastral.';
+        setCamposHabilitados(false);
+        return;
+      }
+
+      resultadoBusqueda.textContent = '🔄 Buscando...';
+
+      const { data, error } = await sb
+        .from('predios2')
+        .select('*')
+        .eq('clave_cata', claveCata)
+        .single();
+
+      if (error || !data) {
+        resultadoBusqueda.textContent = '❌ Clave Catastral incorrecta, vuelva a ingresarla.';
+        setCamposHabilitados(false);
+      } else {
+        resultadoBusqueda.textContent = '✅ Predio encontrado.';
+        setCamposHabilitados(true);
+      }
+    });
+
+    getLocationBtn.addEventListener('click', () => {
+      status.textContent = '🔄 Obteniendo ubicación...';
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            latInput.value = position.coords.latitude.toFixed(6);
+            lonInput.value = position.coords.longitude.toFixed(6);
+            status.textContent = '✅ Ubicación detectada.';
+          },
+          (error) => {
+            console.error(error);
+            status.textContent = '❌ Error al obtener ubicación.';
+          }
+        );
+      } else {
+        status.textContent = '❌ Geolocalización no soportada.';
+      }
+    });
+
+    document.getElementById('formulario').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const data = {
+        clave_catastral: claveInput.value,
+        nombre_propietario: nombreInput.value,
+        numero_tramite: tramiteInput.value,
+        tipo_problema: problemaInput.value,
+        latitud: parseFloat(latInput.value),
+        longitud: parseFloat(lonInput.value),
+      };
+
+      if (!data.latitud || !data.longitud) {
+        status.textContent = '⚠️ Debes obtener tu ubicación antes de enviar.';
+        return;
+      }
+
+      status.textContent = '📤 Enviando a Supabase...';
+
+      const { error } = await sb
+        .from('problemas_predios')
+        .insert([data]);
+
+      if (error) {
+        console.error(error);
+        status.textContent = '❌ Error al registrar: ' + error.message;
+      } else {
+        status.textContent = '✅ Registro exitoso en Supabase.';
+        e.target.reset();
+        latInput.value = '';
+        lonInput.value = '';
+        resultadoBusqueda.textContent = '';
+        setCamposHabilitados(false);
+      }
+    });
+  </script>
+</body>
+</html>
